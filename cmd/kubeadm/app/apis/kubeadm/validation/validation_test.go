@@ -199,57 +199,175 @@ func TestValidateIPNetFromString(t *testing.T) {
 	}
 }
 
+func TestValidateAPIEndpoint(t *testing.T) {
+	var tests = []struct {
+		name     string
+		cfg      *kubeadm.MasterConfiguration
+		expected bool
+	}{
+		{
+			name:     "Missing configuration",
+			cfg:      &kubeadm.MasterConfiguration{},
+			expected: false,
+		},
+		{
+			name: "Valid IPv4 address and default port",
+			cfg: &kubeadm.MasterConfiguration{
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.3.4",
+					BindPort:         6443,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Valid IPv6 address and port",
+			cfg: &kubeadm.MasterConfiguration{
+				API: kubeadm.API{
+					AdvertiseAddress: "2001:db7::1",
+					BindPort:         3446,
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "Invalid IPv4 address",
+			cfg: &kubeadm.MasterConfiguration{
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.34",
+					BindPort:         6443,
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "Invalid IPv6 address",
+			cfg: &kubeadm.MasterConfiguration{
+				API: kubeadm.API{
+					AdvertiseAddress: "2001:db7:1",
+					BindPort:         3446,
+				},
+			},
+			expected: false,
+		},
+	}
+	for _, rt := range tests {
+		actual := ValidateAPIEndpoint(rt.cfg, nil)
+		if (len(actual) == 0) != rt.expected {
+			t.Errorf(
+				"%s test case failed:\n\texpected: %t\n\t  actual: %t",
+				rt.name,
+				rt.expected,
+				(len(actual) == 0),
+			)
+		}
+	}
+}
+
 func TestValidateMasterConfiguration(t *testing.T) {
 	nodename := "valid-nodename"
 	var tests = []struct {
+		name     string
 		s        *kubeadm.MasterConfiguration
 		expected bool
 	}{
-		{&kubeadm.MasterConfiguration{}, false},
-		{&kubeadm.MasterConfiguration{
-			AuthorizationModes: []string{"Node", "RBAC"},
-			Networking: kubeadm.Networking{
-				ServiceSubnet: "10.96.0.1/12",
-				DNSDomain:     "cluster.local",
-			},
-			CertificatesDir: "/some/cert/dir",
-			NodeName:        nodename,
-		}, false},
-		{&kubeadm.MasterConfiguration{
-			AuthorizationModes: []string{"Node", "RBAC"},
-			Networking: kubeadm.Networking{
-				ServiceSubnet: "10.96.0.1/12",
-				DNSDomain:     "cluster.local",
-			},
-			CertificatesDir: "/some/other/cert/dir",
-			Token:           "abcdef.0123456789abcdef",
-			NodeName:        nodename,
-		}, true},
-		{&kubeadm.MasterConfiguration{
-			AuthorizationModes: []string{"Node", "RBAC"},
-			Networking: kubeadm.Networking{
-				ServiceSubnet: "2001:db8::/98",
-				DNSDomain:     "cluster.local",
-			},
-			CertificatesDir: "/some/cert/dir",
-			NodeName:        nodename,
-		}, false},
-		{&kubeadm.MasterConfiguration{
-			AuthorizationModes: []string{"Node", "RBAC"},
-			Networking: kubeadm.Networking{
-				ServiceSubnet: "2001:db8::/98",
-				DNSDomain:     "cluster.local",
-			},
-			CertificatesDir: "/some/other/cert/dir",
-			Token:           "abcdef.0123456789abcdef",
-			NodeName:        nodename,
-		}, true},
+		{"incomplete Master configuration", &kubeadm.MasterConfiguration{}, false},
+		{"missing token and correct certificate directory",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.3.4",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "10.96.0.1/12",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/cert/dir",
+				NodeName:        nodename,
+			}, false},
+		{"valid Master configuration using IPv4 advertise address",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.3.4",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "10.96.0.1/12",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/other/cert/dir",
+				Token:           "abcdef.0123456789abcdef",
+				NodeName:        nodename,
+			}, true},
+		{"valid Master configuration using IPv6 advertise address",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "2001:db7::1",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "10.96.0.1/12",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/other/cert/dir",
+				Token:           "abcdef.0123456789abcdef",
+				NodeName:        nodename,
+			}, true},
+		{"invalid Master IPv4 advertise address",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.34",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "10.96.0.1/12",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/other/cert/dir",
+				Token:           "abcdef.0123456789abcdef",
+				NodeName:        nodename,
+			}, false},
+		{"invalid Master IPv6 advertise address",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "2001:db7:1",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "10.96.0.1/12",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/other/cert/dir",
+				Token:           "abcdef.0123456789abcdef",
+				NodeName:        nodename,
+			}, false},
+		{"valid Master configuration using IPv6 service subnet",
+			&kubeadm.MasterConfiguration{
+				AuthorizationModes: []string{"Node", "RBAC"},
+				API: kubeadm.API{
+					AdvertiseAddress: "1.2.3.4",
+					BindPort:         6443,
+				},
+				Networking: kubeadm.Networking{
+					ServiceSubnet: "2001:db8::/98",
+					DNSDomain:     "cluster.local",
+				},
+				CertificatesDir: "/some/other/cert/dir",
+				Token:           "abcdef.0123456789abcdef",
+				NodeName:        nodename,
+			}, true},
 	}
 	for _, rt := range tests {
 		actual := ValidateMasterConfiguration(rt.s)
 		if (len(actual) == 0) != rt.expected {
 			t.Errorf(
-				"failed ValidateMasterConfiguration:\n\texpected: %t\n\t  actual: %t",
+				"failed %s:\n\texpected: %t\n\t  actual: %t",
+				rt.name,
 				rt.expected,
 				(len(actual) == 0),
 			)

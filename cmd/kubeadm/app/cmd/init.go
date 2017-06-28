@@ -21,7 +21,6 @@ import (
 	"io"
 	"io/ioutil"
 	"path/filepath"
-	"strconv"
 	"text/template"
 
 	"github.com/renstrom/dedent"
@@ -67,7 +66,7 @@ var (
 		You can now join any number of machines by running the following on each node
 		as root:
 
-		  kubeadm join --token {{.Token}} {{.MasterIP}}:{{.MasterPort}}
+		  kubeadm join --token {{.Token}} {{.MasterEndpoint}}
 
 		`)))
 )
@@ -310,12 +309,17 @@ func (i *Init) Run(out io.Writer) error {
 		}
 	}
 
+	// Generate Master Endpoint used by done template
+	masterEndpoint, err := kubeadmutil.GetMasterEndpoint(i.cfg)
+	if err != nil {
+		return err
+	}
+
 	ctx := map[string]string{
 		"KubeConfigPath": filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.AdminKubeConfigFileName),
 		"KubeConfigName": kubeadmconstants.AdminKubeConfigFileName,
 		"Token":          i.cfg.Token,
-		"MasterIP":       i.cfg.API.AdvertiseAddress,
-		"MasterPort":     strconv.Itoa(int(i.cfg.API.BindPort)),
+		"MasterEndpoint": masterEndpoint,
 	}
 	if i.skipTokenPrint {
 		ctx["Token"] = "<value withheld>"
