@@ -34,6 +34,7 @@ const (
 	DefaultCACertPath         = "/etc/kubernetes/pki/ca.crt"
 	DefaultCertificatesDir    = "/etc/kubernetes/pki"
 	DefaultEtcdDataDir        = "/var/lib/etcd"
+	DefaultKubeProxyBindAddr  = "0.0.0.0"
 	DefaultImageRepository    = "gcr.io/google_containers"
 )
 
@@ -48,6 +49,10 @@ func SetDefaults_MasterConfiguration(obj *MasterConfiguration) {
 
 	if obj.API.BindPort == 0 {
 		obj.API.BindPort = DefaultAPIBindPort
+	}
+
+	if obj.KubeProxy.BindAddress == "" {
+		obj.KubeProxy.BindAddress = DefaultKubeProxyBindAddr
 	}
 
 	if obj.Networking.ServiceSubnet == "" {
