@@ -40,7 +40,6 @@ const (
 	DefaultCertificatesDir = "/etc/kubernetes/pki"
 	// DefaultImageRepository defines default image registry
 	DefaultImageRepository = "gcr.io/google_containers"
-
 	// DefaultEtcdDataDir defines default location of etcd where static pods will save data to
 	DefaultEtcdDataDir = "/var/lib/etcd"
 	// DefaultEtcdClusterSize defines the default cluster size when using the etcd-operator
@@ -51,6 +50,8 @@ const (
 	DefaultEtcdCertDir = "/etc/kubernetes/pki/etcd"
 	// DefaultEtcdClusterServiceName is the default name of the service backing the etcd cluster
 	DefaultEtcdClusterServiceName = "etcd-cluster"
+	// DefaultKubeProxyBindAddr defines default kube-proxy bind address
+	DefaultKubeProxyBindAddr = "0.0.0.0"
 )
 
 func addDefaultingFuncs(scheme *runtime.Scheme) error {
@@ -65,6 +66,10 @@ func SetDefaults_MasterConfiguration(obj *MasterConfiguration) {
 
 	if obj.API.BindPort == 0 {
 		obj.API.BindPort = DefaultAPIBindPort
+	}
+
+	if obj.KubeProxy.BindAddress == "" {
+		obj.KubeProxy.BindAddress = DefaultKubeProxyBindAddr
 	}
 
 	if obj.Networking.ServiceSubnet == "" {
