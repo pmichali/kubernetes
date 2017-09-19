@@ -173,9 +173,12 @@ func (config *NetworkingTestConfig) EndpointHostnames() sets.String {
 // more for maxTries. Use this if you want to eg: fail a readiness check on a
 // pod and confirm it doesn't show up as an endpoint.
 func (config *NetworkingTestConfig) DialFromContainer(protocol, containerIP, targetIP string, containerHttpPort, targetPort, maxTries, minTries int, expectedEps sets.String) {
-	cmd := fmt.Sprintf("curl -q -s 'http://%s:%d/dial?request=hostName&protocol=%s&host=%s&port=%d&tries=1'",
-		containerIP,
-		containerHttpPort,
+	ipPort := net.JoinHostPort(containerIP, strconv.Itoa(containerHttpPort))
+	// The current versions of curl included in CentOS and RHEL distros
+	// misinterpret square brackets around IPv6 as globbing, so use the -g
+	// argument to disable globbing to handle the IPv6 case.
+	cmd := fmt.Sprintf("curl -g -q -s 'http://%s/dial?request=hostName&protocol=%s&host=%s&port=%d&tries=1'",
+		ipPort,
 		protocol,
 		targetIP,
 		targetPort)
@@ -218,6 +221,50 @@ func (config *NetworkingTestConfig) DialFromContainer(protocol, containerIP, tar
 	Failf("Failed to find expected endpoints:\nTries %d\nCommand %v\nretrieved %v\nexpected %v\n", maxTries, cmd, eps, expectedEps)
 }
 
+func (config *NetworkingTestConfig) GetEndpointsFromTestContainer(protocol, targetIP string, targetPort, maxTries, minTries int) (sets.String, error) {
+	return config.GetEndpointsFromContainer(protocol, config.TestContainerPod.Status.PodIP, targetIP, TestContainerHttpPort, targetPort, maxTries, minTries)
+}
+
+func (config *NetworkingTestConfig) GetEndpointsFromContainer(protocol, containerIP, targetIP string, containerHttpPort, targetPort, maxTries, minTries int) (sets.String, error) {
+	ipPort := net.JoinHostPort(containerIP, strconv.Itoa(containerHttpPort))
+	// The current versions of curl included in CentOS and RHEL distros
+	// misinterpret square brackets around IPv6 as globbing, so use the -g
+	// argument to disable globbing to handle the IPv6 case.
+	cmd := fmt.Sprintf("curl -g -q -s 'http://%s/dial?request=hostName&protocol=%s&host=%s&port=%d&tries=1'",
+		ipPort,
+		protocol,
+		targetIP,
+		targetPort)
+
+	eps := sets.NewString()
+
+	for i := 0; i < maxTries; i++ {
+		stdout, stderr, err := config.f.ExecShellInPodWithFullOutput(config.HostTestContainerPod.Name, cmd)
+		if err != nil {
+			// A failure to kubectl exec counts as a try, not a hard fail.
+			// Also note that we will keep failing for maxTries in tests where
+			// we confirm unreachability.
+			Logf("Failed to execute %q: %v, stdout: %q, stderr: %q", cmd, err, stdout, stderr)
+		} else {
+			var output map[string][]string
+			if err := json.Unmarshal([]byte(stdout), &output); err != nil {
+				Logf("WARNING: Failed to unmarshal curl response. Cmd %v run in %v, output: %s, err: %v",
+					cmd, config.HostTestContainerPod.Name, stdout, err)
+				continue
+			}
+
+			for _, hostName := range output["responses"] {
+				trimmed := strings.TrimSpace(hostName)
+				if trimmed != "" {
+					eps.Insert(trimmed)
+				}
+			}
+			return eps, nil
+		}
+	}
+	return nil, fmt.Errorf("Failed to get endpoints:\nTries %d\nCommand %v\n", minTries, cmd)
+}
+
 // DialFromNode executes a tcp or udp request based on protocol via kubectl exec
 // in a test container running with host networking.
 // - minTries is the minimum number of curl attempts required before declaring
@@ -235,7 +282,11 @@ func (config *NetworkingTestConfig) DialFromNode(protocol, targetIP string, targ
 		// busybox timeout doesn't support non-integer values.
 		cmd = fmt.Sprintf("echo 'hostName' | timeout -t 2 nc -w 1 -u %s %d", targetIP, targetPort)
 	} else {
-		cmd = fmt.Sprintf("timeout -t 15 curl -q -s --connect-timeout 1 http://%s:%d/hostName", targetIP, targetPort)
+		ipPort := net.JoinHostPort(targetIP, strconv.Itoa(targetPort))
+		// The current versions of curl included in CentOS and RHEL distros
+		// misinterpret square brackets around IPv6 as globbing, so use the -g
+		// argument to disable globbing to handle the IPv6 case.
+		cmd = fmt.Sprintf("timeout -t 15 curl -g -q -s --connect-timeout 1 http://%s/hostName", ipPort)
 	}
 
 	// TODO: This simply tells us that we can reach the endpoints. Check that
@@ -669,7 +720,8 @@ func TestReachableHTTPWithContentTimeout(ip string, port int, request string, ex
 
 func TestReachableHTTPWithContentTimeoutWithRetriableErrorCodes(ip string, port int, request string, expect string, content *bytes.Buffer, retriableErrCodes []int, timeout time.Duration) (bool, error) {
 
-	url := fmt.Sprintf("http://%s:%d%s", ip, port, request)
+	ipPort := net.JoinHostPort(ip, strconv.Itoa(port))
+	url := fmt.Sprintf("http://%s%s", ipPort, request)
 	if ip == "" {
 		Failf("Got empty IP for reachability check (%s)", url)
 		return false, nil
@@ -715,7 +767,8 @@ func TestNotReachableHTTP(ip string, port int) (bool, error) {
 }
 
 func TestNotReachableHTTPTimeout(ip string, port int, timeout time.Duration) (bool, error) {
-	url := fmt.Sprintf("http://%s:%d", ip, port)
+	ipPort := net.JoinHostPort(ip, strconv.Itoa(port))
+	url := fmt.Sprintf("http://%s", ipPort)
 	if ip == "" {
 		Failf("Got empty IP for non-reachability check (%s)", url)
 		return false, nil
@@ -737,7 +790,8 @@ func TestNotReachableHTTPTimeout(ip string, port int, timeout time.Duration) (bo
 }
 
 func TestReachableUDP(ip string, port int, request string, expect string) (bool, error) {
-	uri := fmt.Sprintf("udp://%s:%d", ip, port)
+	ipPort := net.JoinHostPort(ip, strconv.Itoa(port))
+	uri := fmt.Sprintf("udp://%s", ipPort)
 	if ip == "" {
 		Failf("Got empty IP for reachability check (%s)", uri)
 		return false, nil
@@ -749,9 +803,9 @@ func TestReachableUDP(ip string, port int, request string, expect string) (bool,
 
 	Logf("Testing UDP reachability of %v", uri)
 
-	con, err := net.Dial("udp", ip+":"+strconv.Itoa(port))
+	con, err := net.Dial("udp", ipPort)
 	if err != nil {
-		return false, fmt.Errorf("Failed to dial %s:%d: %v", ip, port, err)
+		return false, fmt.Errorf("Failed to dial %s: %v", ipPort, err)
 	}
 
 	_, err = con.Write([]byte(fmt.Sprintf("%s\n", request)))
@@ -780,7 +834,8 @@ func TestReachableUDP(ip string, port int, request string, expect string) (bool,
 }
 
 func TestNotReachableUDP(ip string, port int, request string) (bool, error) {
-	uri := fmt.Sprintf("udp://%s:%d", ip, port)
+	ipPort := net.JoinHostPort(ip, strconv.Itoa(port))
+	uri := fmt.Sprintf("udp://%s", ipPort)
 	if ip == "" {
 		Failf("Got empty IP for reachability check (%s)", uri)
 		return false, nil
@@ -792,7 +847,7 @@ func TestNotReachableUDP(ip string, port int, request string) (bool, error) {
 
 	Logf("Testing UDP non-reachability of %v", uri)
 
-	con, err := net.Dial("udp", ip+":"+strconv.Itoa(port))
+	con, err := net.Dial("udp", ipPort)
 	if err != nil {
 		Logf("Confirmed that %s is not reachable", uri)
 		return true, nil
